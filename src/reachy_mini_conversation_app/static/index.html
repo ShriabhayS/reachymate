@@ -48,6 +48,67 @@
         </div>
       </div>
 
+      <!-- ===== Activation gate (shown when REACHY_ACTIVATION_PHRASE is set) ===== -->
+      <div id="activation-banner" class="panel activation-banner hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Activation</p>
+            <h2>Conversation locked</h2>
+          </div>
+          <span class="chip chip-warn">Phrase required</span>
+        </div>
+        <p class="muted">
+          Mic audio is not sent to the model until you enter the activation phrase. You can also type the exact phrase in the chat box below.
+        </p>
+        <div class="row activation-unlock-row">
+          <label for="activation-phrase-input">Phrase</label>
+          <input id="activation-phrase-input" type="password" autocomplete="off" placeholder="Activation phrase" />
+          <button id="activation-unlock-btn" type="button">Unlock</button>
+        </div>
+        <p id="activation-status" class="status"></p>
+      </div>
+
+      <!-- ===== People registry (voice + face enrollment) ===== -->
+      <div id="people-registry-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Enrollment</p>
+            <h2>Voice &amp; face registry</h2>
+          </div>
+          <span class="chip">Local files</span>
+        </div>
+        <p class="muted small">
+          Records are stored on the robot instance under <code>people_registry/</code>: JPEG faces from Reachy’s camera and voice clips from <strong>this browser’s microphone</strong> (iterative adds per person).
+        </p>
+        <div class="section">
+          <div class="section-heading">
+            <h3>People</h3>
+          </div>
+          <div class="row row-top">
+            <label for="people-select">Current</label>
+            <select id="people-select"></select>
+            <button id="people-refresh" type="button" class="ghost">Refresh</button>
+          </div>
+          <div class="row">
+            <label for="people-new-name">New display name</label>
+            <input id="people-new-name" type="text" placeholder="e.g. Alex" autocomplete="name" />
+            <button id="people-create" type="button" class="ghost">Create person</button>
+          </div>
+          <p id="people-current-id" class="muted small"></p>
+        </div>
+        <div class="section">
+          <div class="section-heading">
+            <h3>Add samples</h3>
+          </div>
+          <div class="actions people-actions">
+            <button id="people-add-face" type="button" class="ghost">Add face (Reachy camera)</button>
+            <button id="people-voice-toggle" type="button" class="ghost" disabled>Start voice clip</button>
+          </div>
+          <p id="people-status" class="status"></p>
+          <div id="people-detail" class="people-detail muted small"></div>
+        </div>
+      </div>
+
       <!-- ===== Controls Bar ===== -->
       <div id="controls-bar" class="controls-bar hidden">
         <button id="btn-wakeup" class="ghost">Wake up</button>

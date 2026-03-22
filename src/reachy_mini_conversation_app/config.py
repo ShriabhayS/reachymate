@@ -34,6 +34,11 @@ class Config:
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
+    # Optional: require this exact phrase (case-insensitive) before mic audio is
+    # sent to the model and before assistant audio plays. Unlock via dashboard
+    # chat, POST /activation/unlock, or typing the phrase in the chat box.
+    REACHY_ACTIVATION_PHRASE = os.getenv("REACHY_ACTIVATION_PHRASE", "").strip() or None
+
 
 config = Config()
 

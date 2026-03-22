@@ -136,6 +136,41 @@ body {
   border-color: rgba(76, 224, 179, 0.4);
 }
 
+.chip-warn {
+  background: rgba(255, 181, 71, 0.12);
+  color: var(--warn);
+  border-color: rgba(255, 181, 71, 0.4);
+}
+
+.activation-banner {
+  border-color: rgba(255, 181, 71, 0.25);
+}
+
+.activation-unlock-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 120px) 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .activation-unlock-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.people-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.people-detail {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
 .hidden { display: none; }
 label {
   display: block;

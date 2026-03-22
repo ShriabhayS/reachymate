@@ -287,11 +287,15 @@ async function init() {
   show(visionPanel, true);
   show(chatPanel, true);
   show(controlsBar, true);
+  const peoplePanel = document.getElementById("people-registry-panel");
+  if (peoplePanel) show(peoplePanel, true);
   startCameraFeed();
   startChatPolling();
   initControls();
   initChatInput();
   initDoctorMode();
+  initActivationGate();
+  initPeopleRegistry();
 
   // Wait until backend routes are ready before rendering personalities UI
   const list = (await waitForPersonalityData()) || { choices: [] };
@@ -783,7 +787,7 @@ function initChatInput() {
     input.value = "";
     sendBtn.disabled = true;
     try {
-      await fetchWithTimeout(
+      const resp = await fetchWithTimeout(
         "/chat/send",
         {
           method: "POST",
@@ -792,6 +796,23 @@ function initChatInput() {
         },
         10000,
       );
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.activation === "unlocked") {
+        const banner = document.getElementById("activation-banner");
+        if (banner) show(banner, false);
+      } else if (resp.status === 403 && data.error === "activation_required") {
+        const container = document.getElementById("chat-messages");
+        if (container) {
+          const empty = container.querySelector(".chat-empty");
+          if (empty) empty.remove();
+          const bubble = document.createElement("div");
+          bubble.className = "chat-bubble chat-assistant";
+          bubble.innerHTML =
+            '<span class="chat-label">System</span><span class="chat-text">Enter the activation phrase here or use the banner above.</span>';
+          container.appendChild(bubble);
+          container.scrollTop = container.scrollHeight;
+        }
+      }
     } catch {
       // message will not appear in chat if send failed
     } finally {
@@ -983,6 +1004,296 @@ function initDoctorMode() {
     .catch(() => {});
 
   loadCases();
+}
+
+// ----- Activation phrase (REACHY_ACTIVATION_PHRASE) -----
+function initActivationGate() {
+  const banner = document.getElementById("activation-banner");
+  const input = document.getElementById("activation-phrase-input");
+  const btn = document.getElementById("activation-unlock-btn");
+  const st = document.getElementById("activation-status");
+  if (!banner || !input || !btn || !st) return;
+
+  async function sync() {
+    try {
+      const url = new URL("/status", window.location.origin);
+      url.searchParams.set("_", Date.now().toString());
+      const r = await fetchWithTimeout(url, {}, 2500);
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data.activation_required && !data.activation_unlocked) {
+        show(banner, true);
+      } else {
+        show(banner, false);
+        st.textContent = "";
+        st.className = "status";
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  sync();
+  setInterval(sync, 4000);
+
+  btn.addEventListener("click", async () => {
+    const phrase = input.value.trim();
+    if (!phrase) {
+      st.textContent = "Enter the phrase.";
+      st.className = "status warn";
+      return;
+    }
+    st.textContent = "Checking…";
+    st.className = "status";
+    try {
+      const resp = await fetchWithTimeout(
+        "/activation/unlock",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phrase }),
+        },
+        5000,
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.unlocked) {
+        show(banner, false);
+        st.textContent = "Unlocked.";
+        st.className = "status ok";
+        input.value = "";
+      } else {
+        st.textContent = "Wrong phrase.";
+        st.className = "status error";
+      }
+    } catch {
+      st.textContent = "Request failed.";
+      st.className = "status error";
+    }
+  });
+}
+
+// ----- People registry (face + voice files under instance people_registry/) -----
+function initPeopleRegistry() {
+  const panel = document.getElementById("people-registry-panel");
+  const sel = document.getElementById("people-select");
+  const refreshBtn = document.getElementById("people-refresh");
+  const newName = document.getElementById("people-new-name");
+  const createBtn = document.getElementById("people-create");
+  const addFaceBtn = document.getElementById("people-add-face");
+  const voiceToggle = document.getElementById("people-voice-toggle");
+  const statusEl = document.getElementById("people-status");
+  const detailEl = document.getElementById("people-detail");
+  const currentIdEl = document.getElementById("people-current-id");
+  if (!panel || !sel || !statusEl || !refreshBtn || !newName || !createBtn || !addFaceBtn || !voiceToggle || !detailEl || !currentIdEl) return;
+
+  let peopleList = [];
+  let recordingVoice = false;
+  let mediaRecorder = null;
+  let mediaStream = null;
+  let voiceChunks = [];
+
+  function syncDetail() {
+    const id = sel.value;
+    currentIdEl.textContent = id ? `Person id: ${id}` : "";
+    const p = peopleList.find((x) => x.id === id);
+    if (p) {
+      detailEl.textContent = `faces: ${(p.faces || []).join(", ") || "—"}\nvoices: ${(p.voices || []).join(", ") || "—"}`;
+    } else {
+      detailEl.textContent = "";
+    }
+    if (voiceToggle) voiceToggle.disabled = !id || recordingVoice;
+    if (addFaceBtn) addFaceBtn.disabled = !id;
+  }
+
+  async function refreshList() {
+    statusEl.textContent = "Loading registry…";
+    statusEl.className = "status";
+    try {
+      const url = new URL("/people/registry", window.location.origin);
+      url.searchParams.set("_", Date.now().toString());
+      const r = await fetchWithTimeout(url, {}, 5000);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) {
+        statusEl.textContent = data.error || "Registry unavailable (backend starting…)";
+        statusEl.className = "status warn";
+        return;
+      }
+      peopleList = Array.isArray(data.people) ? data.people : [];
+      const prev = sel.value;
+      sel.innerHTML = "";
+      for (const p of peopleList) {
+        const o = document.createElement("option");
+        o.value = p.id;
+        const short = p.id.slice(0, 8);
+        o.textContent = `${p.display_name || "unnamed"} (${short}…)`;
+        sel.appendChild(o);
+      }
+      if (prev && peopleList.some((x) => x.id === prev)) sel.value = prev;
+      else if (peopleList.length) sel.selectedIndex = 0;
+      statusEl.textContent = peopleList.length ? `${peopleList.length} person(s).` : "No people yet — create one.";
+      statusEl.className = "status ok";
+      syncDetail();
+    } catch {
+      statusEl.textContent = "Failed to load registry.";
+      statusEl.className = "status error";
+    }
+  }
+
+  sel.addEventListener("change", syncDetail);
+  refreshBtn.addEventListener("click", () => refreshList());
+
+  createBtn.addEventListener("click", async () => {
+    const name = (newName.value || "").trim();
+    if (!name) {
+      statusEl.textContent = "Enter a display name.";
+      statusEl.className = "status warn";
+      return;
+    }
+    statusEl.textContent = "Creating…";
+    statusEl.className = "status";
+    try {
+      const resp = await fetchWithTimeout(
+        "/people/registry/create",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name: name }),
+        },
+        8000,
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        statusEl.textContent = data.error || "Create failed";
+        statusEl.className = "status error";
+        return;
+      }
+      newName.value = "";
+      await refreshList();
+      if (data.person && data.person.id) sel.value = data.person.id;
+      syncDetail();
+      statusEl.textContent = "Person created.";
+      statusEl.className = "status ok";
+    } catch {
+      statusEl.textContent = "Create request failed.";
+      statusEl.className = "status error";
+    }
+  });
+
+  addFaceBtn.addEventListener("click", async () => {
+    const id = sel.value;
+    if (!id) return;
+    statusEl.textContent = "Capturing from Reachy…";
+    statusEl.className = "status";
+    try {
+      const photoResp = await fetchWithTimeout("/camera/photo", { method: "POST" }, 8000);
+      const photo = await photoResp.json().catch(() => ({}));
+      if (!photo.ok || !photo.image) {
+        statusEl.textContent = photo.error || "Camera capture failed";
+        statusEl.className = "status error";
+        return;
+      }
+      const up = await fetchWithTimeout(
+        `/people/registry/${encodeURIComponent(id)}/face`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_b64: photo.image }),
+        },
+        15000,
+      );
+      const upData = await up.json().catch(() => ({}));
+      if (!up.ok || !upData.ok) {
+        statusEl.textContent = upData.error || "Upload failed";
+        statusEl.className = "status error";
+        return;
+      }
+      await refreshList();
+      statusEl.textContent = `Saved ${upData.file}`;
+      statusEl.className = "status ok";
+    } catch {
+      statusEl.textContent = "Face capture/upload failed.";
+      statusEl.className = "status error";
+    }
+  });
+
+  voiceToggle.addEventListener("click", async () => {
+    const id = sel.value;
+    if (!id) return;
+    if (!recordingVoice) {
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : MediaRecorder.isTypeSupported("audio/webm")
+            ? "audio/webm"
+            : "";
+        mediaRecorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream);
+        voiceChunks = [];
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size) voiceChunks.push(e.data);
+        };
+        mediaRecorder.start(200);
+        recordingVoice = true;
+        voiceToggle.textContent = "Stop & upload clip";
+        voiceToggle.disabled = false;
+        statusEl.textContent = "Recording…";
+        statusEl.className = "status";
+      } catch {
+        statusEl.textContent = "Microphone permission denied or unavailable.";
+        statusEl.className = "status error";
+      }
+      return;
+    }
+
+    recordingVoice = false;
+    voiceToggle.textContent = "Start voice clip";
+    voiceToggle.disabled = true;
+    statusEl.textContent = "Finishing recording…";
+    try {
+      const rec = mediaRecorder;
+      await new Promise((resolve) => {
+        if (!rec || rec.state === "inactive") return resolve();
+        rec.onstop = resolve;
+        rec.stop();
+      });
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+        mediaStream = null;
+      }
+      const blobMime = rec ? rec.mimeType : "audio/webm";
+      const blob = new Blob(voiceChunks, { type: blobMime });
+      mediaRecorder = null;
+      voiceChunks = [];
+      if (blob.size < 256) {
+        statusEl.textContent = "Clip too short.";
+        statusEl.className = "status warn";
+        syncDetail();
+        return;
+      }
+      const ct = blob.type || "audio/webm";
+      const up = await fetchWithTimeout(
+        `/people/registry/${encodeURIComponent(id)}/voice`,
+        { method: "POST", headers: { "Content-Type": ct }, body: blob },
+        60000,
+      );
+      const upData = await up.json().catch(() => ({}));
+      if (!up.ok || !upData.ok) {
+        statusEl.textContent = upData.error || "Upload failed";
+        statusEl.className = "status error";
+        syncDetail();
+        return;
+      }
+      await refreshList();
+      statusEl.textContent = `Saved ${upData.file}`;
+      statusEl.className = "status ok";
+    } catch {
+      statusEl.textContent = "Voice upload failed.";
+      statusEl.className = "status error";
+    }
+    syncDetail();
+  });
+
+  refreshList();
 }
 
 window.addEventListener("DOMContentLoaded", init);
