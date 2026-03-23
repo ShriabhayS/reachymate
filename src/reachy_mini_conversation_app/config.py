@@ -54,6 +54,11 @@ class Config:
     INSIGHTFACE_MODEL_NAME = os.getenv("INSIGHTFACE_MODEL_NAME", "buffalo_l")
     WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base").strip()
 
+    # Optional: require this exact phrase (case-insensitive) before mic audio is
+    # sent to the model and before assistant audio plays. Unlock via dashboard
+    # chat, POST /activation/unlock, or typing the phrase in the chat box.
+    REACHY_ACTIVATION_PHRASE = os.getenv("REACHY_ACTIVATION_PHRASE", "").strip() or None
+
 
 config = Config()
 
