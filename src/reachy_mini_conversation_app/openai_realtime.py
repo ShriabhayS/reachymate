@@ -156,6 +156,48 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             logger.debug("Debounced partial cancelled")
             raise
 
+    async def _autonomous_checkin_task(self) -> None:
+        """Forward the gate's autonomous check-in loop if available."""
+        rg = getattr(self.deps, "receptionist_gate", None)
+        if rg is None:
+            return
+        run_loop = getattr(rg, "run_autonomous_checkin_loop", None)
+        if callable(run_loop):
+            try:
+                await run_loop()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("Autonomous check-in loop exited unexpectedly: %s", e)
+
+    async def _prompt_injector_task(self) -> None:
+        """Periodically check for pending spoken prompts from the state machine and inject them."""
+        while True:
+            await asyncio.sleep(0.5)
+            rg = getattr(self.deps, "receptionist_gate", None)
+            if rg is None:
+                continue
+            pop = getattr(rg, "pop_pending_prompt", None)
+            if not callable(pop):
+                continue
+            prompt = pop()
+            if not prompt or self.connection is None:
+                continue
+            try:
+                await self.connection.conversation.item.create(
+                    item={
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": f"[Receptionist system] Say this to the visitor: {prompt}"}],
+                    },
+                )
+                await self.connection.response.create(
+                    response={"instructions": f"Say exactly this to the visitor: {prompt}"},
+                )
+                logger.info("Injected pending prompt: %s", prompt[:80])
+            except Exception as e:
+                logger.warning("Prompt injection failed: %s", e)
+
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
         openai_api_key = config.OPENAI_API_KEY
@@ -179,6 +221,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 openai_api_key = "DUMMY"
 
         self.client = AsyncOpenAI(api_key=openai_api_key)
+
+        # Start background tasks that live for the lifetime of this handler
+        asyncio.create_task(self._autonomous_checkin_task(), name="autonomous-checkin")
+        asyncio.create_task(self._prompt_injector_task(), name="prompt-injector")
 
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
